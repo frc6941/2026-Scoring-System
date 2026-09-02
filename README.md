@@ -66,24 +66,20 @@ and configured with internal pull-ups. Every debounced low transition adds one
 to the cumulative score. As in the 4201 reference Hub, a fresh
 `DEBUG_MOTOR_SPINUP` command clears that raw counter for manual testing.
 
-GPIO `15` is the documented one-bit interface to the Arduino Uno LED
-controller's `EDGE_PIN`, with a shared ground. It is high only for this Hub's
-active alliance patterns: `red`, `red_flash`, and `red_chase` on the red build;
-`blue`, `blue_flash`, and `blue_chase` on the blue build. It is low for `off`,
-`green`, `purple`, `white`, an unknown pattern, or a stale command. The Uno
-remains responsible for the physical strip's alliance colour, breathing, and
-off behavior; its one-bit input cannot represent the 4201 flash/chase animation
-itself.
+ESP32 GPIO `15` connects to Arduino Uno `D2` (`EDGE_PIN`) with a shared ground.
+It is high only for this Hub's active alliance patterns: `red`, `red_flash`,
+and `red_chase` on the red build; `blue`, `blue_flash`, and `blue_chase` on the
+blue build. It is low for `off`, `green`, `purple`, `white`, an unknown pattern,
+or a stale command. The Uno owns the physical outputs: `D6` drives the LED
+strip data signal and `D9` provides the PWM output for the motor path.
 
 `hubState` is still parsed from every command, but Showdown Arena uses it for
 the Hub motors and keeps both Hub motors active during much of a match. The
 per-Hub active indication comes from `ledPattern`.
 
-The current Hub hardware contract has no ESP32-to-Uno PWM, serial, I2C, or
-other motor-control connection. `motorDuty` is parsed and retained for protocol
-diagnostics, but the existing Uno firmware owns the fixed motor output. Do not
-assign 4201's direct motor GPIOs to this hardware without an explicit wiring
-and Arduino protocol change.
+`motorDuty` is parsed and retained for the later Hub-internal motor integration.
+This ESP32 firmware does not directly drive Uno `D9`; the Uno owns that PWM
+output.
 
 ## Build and upload
 
