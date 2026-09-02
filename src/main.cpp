@@ -6,7 +6,6 @@
 #include <ArduinoJson.h>
 #include <Ethernet.h>
 #include <SPI.h>
-#include <Adafruit_NeoPixel.h>
 
 #ifndef HUB_IS_RED
 #define HUB_IS_RED 0
@@ -24,9 +23,9 @@ constexpr int W5500_MISO = 12;
 constexpr int W5500_MOSI = 11;
 constexpr int W5500_SCK = 13;
 
-constexpr int LED_PIN = 15;
-constexpr uint16_t LED_COUNT = 30;
-constexpr uint8_t LED_BRIGHTNESS = 80;
+// Logic-level output to the Arduino Uno LED controller (Uno EDGE_PIN 2).
+// HIGH means the Hub is active; LOW means inactive. The Uno owns all LED effects.
+constexpr int HUB_STATUS_OUTPUT_PIN = 15;
 
 constexpr int IR_SENSOR_PINS[] = {33, 34, 35, 36};
 constexpr size_t SENSOR_COUNT = sizeof(IR_SENSOR_PINS) / sizeof(IR_SENSOR_PINS[0]);
@@ -41,7 +40,6 @@ enum MatchState : uint8_t {
 };
 
 EthernetClient wsClient;
-Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 MatchState currentMatchState = STATE_PRE_MATCH;
 int currentMatchTimeSec = 0;
 bool hubIsActive = false;
@@ -50,8 +48,6 @@ bool shiftOrderDetermined = false;
 bool webSocketConnected = false;
 unsigned long gracePeriodEnd = 0;
 unsigned long nextWebSocketAttempt = 0;
-uint32_t displayedStripColor = 0;
-unsigned long nextStripRefresh = 0;
 unsigned long lastSensorTrigger[SENSOR_COUNT] = {};
 int lastSensorValue[SENSOR_COUNT] = {};
 int localAutoScore = 0;
@@ -73,32 +69,6 @@ struct FrameReader {
     length = read = 0;
   }
 } frame;
-
-void setStrip(uint32_t color) {
-  if (color == displayedStripColor && static_cast<long>(nextStripRefresh - millis()) > 0) return;
-  for (uint16_t i = 0; i < LED_COUNT; ++i) strip.setPixelColor(i, color);
-  strip.show();
-  displayedStripColor = color;
-  nextStripRefresh = millis() + 25;
-}
-
-uint32_t allianceColor(uint8_t level) {
-  return strcmp(ALLIANCE_NAME, "red") == 0 ? strip.Color(level, 0, 0) : strip.Color(0, 0, level);
-}
-
-void updateStrip() {
-  const unsigned long now = millis();
-  if (hubIsActive) {
-    setStrip(allianceColor(255));
-  } else if (static_cast<long>(gracePeriodEnd - now) > 0) {
-    // The LED breathing period and the scoring grace period are the same 3 s.
-    const float phase = (now % 1000UL) / 1000.0f;
-    const float wave = (sinf(phase * 2.0f * PI - PI / 2.0f) + 1.0f) * 0.5f;
-    setStrip(allianceColor(static_cast<uint8_t>(20 + wave * 180)));
-  } else {
-    setStrip(0);
-  }
-}
 
 void connectEthernet() {
   SPI.begin(W5500_SCK, W5500_MISO, W5500_MOSI, W5500_CS);
@@ -213,6 +183,8 @@ void updateHubStatus() {
     Serial.println("[GAME LOGIC] Hub Deactivated -> 3s Grace Period Started");
   }
   hubIsActive = newHubStatus;
+  // The Uno detects this falling/rising edge and drives the physical strip.
+  digitalWrite(HUB_STATUS_OUTPUT_PIN, hubIsActive ? HIGH : LOW);
 }
 
 bool canScoreNow() { return hubIsActive || static_cast<long>(gracePeriodEnd - millis()) > 0; }
@@ -372,10 +344,8 @@ void setup() {
     pinMode(IR_SENSOR_PINS[i], INPUT_PULLUP);
     lastSensorValue[i] = digitalRead(IR_SENSOR_PINS[i]);
   }
-  strip.begin();
-  strip.setBrightness(LED_BRIGHTNESS);
-  strip.clear();
-  strip.show();
+  pinMode(HUB_STATUS_OUTPUT_PIN, OUTPUT);
+  digitalWrite(HUB_STATUS_OUTPUT_PIN, LOW);
   randomSeed(micros());
   connectEthernet();
 }
@@ -383,6 +353,5 @@ void setup() {
 void loop() {
   serviceWebSocket();
   processSensors();
-  updateStrip();
   delay(1);
 }

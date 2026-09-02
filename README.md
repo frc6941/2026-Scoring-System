@@ -17,10 +17,12 @@ red Hub is `67.67.67.3` with MAC suffix `ED`. No Internet gateway is required.
 The defaults match the supplied W5500 wiring: CS 14, MISO 12, MOSI 11, SCK 13.
 IR inputs are 33, 34, 35, and 36 and trigger on LOW with internal pull-ups.
 
-The WS2812/NeoPixel strip uses GPIO 15 and defaults to 30 LEDs. Set `LED_PIN`,
-`LED_COUNT`, and `LED_BRIGHTNESS` to match the installed strip. It is solid
-alliance colour while the Hub is active, breathes for the three-second scoring
-grace period immediately after deactivation, and then turns off.
+GPIO 15 is a logic-level Hub status output for the Arduino Uno LED controller:
+it is `HIGH` while the Hub is active and `LOW` while inactive. The ESP32 does
+not drive the LED strip. Connect GPIO 15 to the Uno `EDGE_PIN` (with a shared
+ground); the Uno code owns the solid, breathing, and off LED states. The output
+goes LOW immediately on deactivation, including during the three-second scoring
+grace period, so the Uno can start its breathing sequence on the falling edge.
 
 ## Build and upload
 
@@ -34,5 +36,5 @@ py -m platformio device monitor
 ```
 
 Install the `Ethernet` Arduino library appropriate for the W5500 board if it
-is not already supplied by the selected ESP32 framework. `ArduinoJson` and
-`Adafruit NeoPixel` are declared in `platformio.ini`.
+is not already supplied by the selected ESP32 framework. `ArduinoJson` is
+declared in `platformio.ini`.
