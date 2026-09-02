@@ -29,9 +29,14 @@ constexpr int W5500_MISO = 12;
 constexpr int W5500_MOSI = 11;
 constexpr int W5500_SCK = 13;
 
-// ESP32 GPIO 15 is wired to the Arduino Uno's EDGE_PIN. The Uno owns the
-// strip animation and receives only the Hub active/inactive level.
-constexpr int HUB_STATUS_OUTPUT_PIN = 15;
+// ESP32 GPIO 15 is a one-way UART TX to the Arduino Uno's D2 RX. The Uno
+// owns the LED strip and motor output, while this node supplies 4201 commands.
+constexpr int UNO_COMMAND_TX_PIN = 15;
+constexpr uint32_t UNO_COMMAND_BAUD = 9600;
+constexpr unsigned long UNO_COMMAND_INTERVAL_MS = 40;
+constexpr uint8_t UNO_FRAME_SYNC_0 = 0xA5;
+constexpr uint8_t UNO_FRAME_SYNC_1 = 0x5A;
+constexpr uint8_t UNO_FRAME_CONTROL_VERSION = 0xA0;
 
 constexpr int IR_SENSOR_PINS[] = {33, 34, 35, 36};
 constexpr size_t SENSOR_COUNT = sizeof(IR_SENSOR_PINS) / sizeof(IR_SENSOR_PINS[0]);
@@ -41,8 +46,23 @@ constexpr unsigned long DEBOUNCE_MS = 50;
 constexpr uint16_t UDP_COMMAND_PORT = 5300;
 constexpr uint16_t UDP_STATUS_PORT = 5301;
 constexpr unsigned long STATUS_INTERVAL_MS = 100;
-constexpr unsigned long COMMAND_TIMEOUT_MS = 2000;
+// Showdown Arena sends commands every 100 ms. Stop actuators after three
+// missing command intervals instead of retaining a motor command for seconds.
+constexpr unsigned long COMMAND_TIMEOUT_MS = 300;
 constexpr size_t MAX_COMMAND_PACKET_BYTES = 1024;
+
+enum class UnoLedPattern : uint8_t {
+  Off = 0,
+  Red = 1,
+  Blue = 2,
+  RedFlash = 3,
+  BlueFlash = 4,
+  RedChase = 5,
+  BlueChase = 6,
+  Green = 7,
+  Purple = 8,
+  White = 9,
+};
 
 struct NodeCommand {
   String hubState = "DISABLED";
@@ -52,42 +72,79 @@ struct NodeCommand {
 };
 
 EthernetUDP udp;
+HardwareSerial unoLink(1);
 NodeCommand command;
 IPAddress arenaStatusTarget = DEFAULT_ARENA_IP;
 unsigned long lastCommandReceivedMs = 0;
 bool hasReceivedCommand = false;
 unsigned long lastStatusSentMs = 0;
+unsigned long lastUnoCommandSentMs = 0;
 unsigned long lastSensorTrigger[SENSOR_COUNT] = {};
 int lastSensorValue[SENSOR_COUNT] = {};
 uint32_t cumulativeScore = 0;
-bool lastUnoStatusOutput = false;
 
 bool commandIsFresh() {
   return hasReceivedCommand &&
          static_cast<unsigned long>(millis() - lastCommandReceivedMs) < COMMAND_TIMEOUT_MS;
 }
 
-bool isActiveAlliancePattern(const String &pattern) {
-  // hubState controls the reference Hub motors, which run for both alliances
-  // during much of a match. ledPattern identifies the Hub that is active.
-#if HUB_IS_RED
-  return pattern == "red" || pattern == "red_flash" || pattern == "red_chase";
-#else
-  return pattern == "blue" || pattern == "blue_flash" || pattern == "blue_chase";
-#endif
+bool hubStateAllowsMotor(const String &hubState) {
+  return hubState == "SCORING_ACTIVE" || hubState == "SCORING_INACTIVE" ||
+         hubState == "DEBUG_MOTOR_SPINUP";
 }
 
-bool commandRequestsHubActive() {
-  return commandIsFresh() && isActiveAlliancePattern(command.ledPattern);
+UnoLedPattern toUnoLedPattern(const String &pattern) {
+  if (pattern == "red") return UnoLedPattern::Red;
+  if (pattern == "blue") return UnoLedPattern::Blue;
+  if (pattern == "red_flash") return UnoLedPattern::RedFlash;
+  if (pattern == "blue_flash") return UnoLedPattern::BlueFlash;
+  if (pattern == "red_chase") return UnoLedPattern::RedChase;
+  if (pattern == "blue_chase") return UnoLedPattern::BlueChase;
+  if (pattern == "green") return UnoLedPattern::Green;
+  if (pattern == "purple") return UnoLedPattern::Purple;
+  if (pattern == "white") return UnoLedPattern::White;
+  return UnoLedPattern::Off;
 }
 
-void updateUnoStatusOutput() {
-  const bool active = commandRequestsHubActive();
-  if (active == lastUnoStatusOutput) return;
+uint8_t crc8Atm(const uint8_t *data, size_t length) {
+  uint8_t crc = 0;
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      crc = (crc & 0x80) ? static_cast<uint8_t>((crc << 1) ^ 0x07)
+                           : static_cast<uint8_t>(crc << 1);
+    }
+  }
+  return crc;
+}
 
-  digitalWrite(HUB_STATUS_OUTPUT_PIN, active ? HIGH : LOW);
-  lastUnoStatusOutput = active;
-  Serial.printf("[UNO] Hub status: %s\n", active ? "ACTIVE" : "INACTIVE");
+void sendUnoCommand() {
+  const bool fresh = commandIsFresh();
+  const bool motorEnabled = fresh && hubStateAllowsMotor(command.hubState);
+  const float effectiveDuty = motorEnabled ? constrain(command.motorDuty, 0.0f, 1.0f) : 0.0f;
+  const uint8_t motorDuty = static_cast<uint8_t>(effectiveDuty * 255.0f + 0.5f);
+  const UnoLedPattern pattern = fresh ? toUnoLedPattern(command.ledPattern) : UnoLedPattern::Off;
+
+  uint8_t frame[] = {
+      UNO_FRAME_SYNC_0,
+      UNO_FRAME_SYNC_1,
+      static_cast<uint8_t>(UNO_FRAME_CONTROL_VERSION | (motorEnabled ? 0x01 : 0x00)),
+      static_cast<uint8_t>(pattern),
+      motorDuty,
+      0,
+  };
+  frame[sizeof(frame) - 1] = crc8Atm(frame, sizeof(frame) - 1);
+  unoLink.write(frame, sizeof(frame));
+}
+
+void serviceUnoCommand() {
+  const unsigned long now = millis();
+  if (now - lastUnoCommandSentMs < UNO_COMMAND_INTERVAL_MS) return;
+
+  // Send exactly one frame per interval. Catch-up bursts would overlap the
+  // Uno's WS2812 update window and make SoftwareSerial reception unreliable.
+  lastUnoCommandSentMs = now;
+  sendUnoCommand();
 }
 
 void connectEthernet() {
@@ -128,23 +185,34 @@ bool decodeNodeCommand(const char *payload, size_t length) {
     return false;
   }
 
-  bool commandChanged = false;
-
-  // These fields are optional in the 4201 schema, so retain the current value
-  // if the arena deliberately omits one from a command packet.
-  if (document["hubState"].is<const char *>()) {
-    const char *receivedHubState = document["hubState"].as<const char *>();
-    if (command.hubState != receivedHubState) {
-      command.hubState = receivedHubState;
-      commandChanged = true;
-    }
+  const JsonVariantConst hubState = document["hubState"];
+  const JsonVariantConst motorDuty = document["motorDuty"];
+  if (!hubState.is<const char *>() || !(motorDuty.is<int>() || motorDuty.is<float>())) {
+    Serial.println("[UDP] Ignored incomplete Hub command");
+    return false;
   }
-  if (document["ledPattern"].is<const char *>()) {
-    const char *receivedLedPattern = document["ledPattern"].as<const char *>();
-    if (command.ledPattern != receivedLedPattern) {
-      command.ledPattern = receivedLedPattern;
-      commandChanged = true;
-    }
+
+  const float receivedDuty = motorDuty.as<float>();
+  if (!isfinite(receivedDuty)) {
+    Serial.println("[UDP] Ignored Hub command with invalid motorDuty");
+    return false;
+  }
+
+  bool commandChanged = false;
+  const char *receivedHubState = hubState.as<const char *>();
+  if (command.hubState != receivedHubState) {
+    command.hubState = receivedHubState;
+    commandChanged = true;
+  }
+
+  // The arena may omit an empty ledPattern. Treat that as off rather than
+  // retaining a previous active pattern.
+  const char *receivedLedPattern = document["ledPattern"].is<const char *>()
+                                       ? document["ledPattern"].as<const char *>()
+                                       : "off";
+  if (command.ledPattern != receivedLedPattern) {
+    command.ledPattern = receivedLedPattern;
+    commandChanged = true;
   }
   if (document["matchState"].is<int>()) {
     const int receivedMatchState = document["matchState"].as<int>();
@@ -153,17 +221,10 @@ bool decodeNodeCommand(const char *payload, size_t length) {
       commandChanged = true;
     }
   }
-  const JsonVariantConst motorDuty = document["motorDuty"];
-  // encoding/json emits an integral-valued float64 such as 1.0 as `1`.
-  if (motorDuty.is<int>() || motorDuty.is<float>()) {
-    const float receivedDuty = motorDuty.as<float>();
-    if (isfinite(receivedDuty)) {
-      const float constrainedDuty = constrain(receivedDuty, -1.0f, 1.0f);
-      if (command.motorDuty != constrainedDuty) {
-        command.motorDuty = constrainedDuty;
-        commandChanged = true;
-      }
-    }
+  const float constrainedDuty = constrain(receivedDuty, -1.0f, 1.0f);
+  if (command.motorDuty != constrainedDuty) {
+    command.motorDuty = constrainedDuty;
+    commandChanged = true;
   }
 
   lastCommandReceivedMs = millis();
@@ -264,8 +325,9 @@ void setup() {
     pinMode(IR_SENSOR_PINS[i], INPUT_PULLUP);
     lastSensorValue[i] = digitalRead(IR_SENSOR_PINS[i]);
   }
-  pinMode(HUB_STATUS_OUTPUT_PIN, OUTPUT);
-  digitalWrite(HUB_STATUS_OUTPUT_PIN, LOW);
+  unoLink.begin(UNO_COMMAND_BAUD, SERIAL_8N1, -1, UNO_COMMAND_TX_PIN);
+  sendUnoCommand();  // Explicitly initialize the Uno with safe outputs.
+  lastUnoCommandSentMs = millis();
 
   connectEthernet();
 }
@@ -273,7 +335,7 @@ void setup() {
 void loop() {
   serviceCommands();
   processSensors();
-  updateUnoStatusOutput();
+  serviceUnoCommand();
   serviceStatus();
   delay(1);
 }

@@ -66,29 +66,103 @@ and configured with internal pull-ups. Every debounced low transition adds one
 to the cumulative score. As in the 4201 reference Hub, a fresh
 `DEBUG_MOTOR_SPINUP` command clears that raw counter for manual testing.
 
-ESP32 GPIO `15` connects to Arduino Uno `D2` (`EDGE_PIN`) with a shared ground.
-It is high only for this Hub's active alliance patterns: `red`, `red_flash`,
-and `red_chase` on the red build; `blue`, `blue_flash`, and `blue_chase` on the
-blue build. It is low for `off`, `green`, `purple`, `white`, an unknown pattern,
-or a stale command. The Uno owns the physical outputs: `D6` drives the LED
-strip data signal and `D9` provides the PWM output for the motor path.
+ESP32 GPIO `15` connects to Arduino Uno `D2` with a shared ground. It is a
+one-way `9600` baud, 8N1 UART link from ESP32 TX to Uno RX, not a binary
+active/inactive signal. The ESP32 sends one command every 40 ms:
 
-`hubState` is still parsed from every command, but Showdown Arena uses it for
-the Hub motors and keeps both Hub motors active during much of a match. The
-per-Hub active indication comes from `ledPattern`.
+| Byte | Value |
+| --- | --- |
+| 0 | `0xA5` |
+| 1 | `0x5A` |
+| 2 | `0xA0` protocol version, plus bit 0 for motor enabled |
+| 3 | LED pattern enum: `0` off, `1` red, `2` blue, `3` red flash, `4` blue flash, `5` red chase, `6` blue chase, `7` green, `8` purple, `9` white |
+| 4 | Motor duty from `0` to `255` |
+| 5 | CRC-8/ATM of bytes 0 through 4 |
 
-`motorDuty` is parsed and retained for the later Hub-internal motor integration.
-This ESP32 firmware does not directly drive Uno `D9`; the Uno owns that PWM
-output.
+The Uno ignores incomplete, malformed, or CRC-invalid frames. Its `D6` drives
+the WS2812B LED data signal and its `D9` provides the motor PWM signal. The
+Uno controls all 4201 LED patterns, including the flash and chase animations.
+It sends a neutral `1500 us` motor pulse and turns the strip off if no valid
+frame arrives for 300 ms. The ESP32 independently sends an explicit safe frame
+after 300 ms without a valid 4201 command. A Hub command must include valid
+`hubState` and `motorDuty`; an omitted `ledPattern` is treated as `off`.
 
-## Build and upload
+For motor state gating, the ESP32 follows the 4201 reference Hub:
+`SCORING_ACTIVE`, `SCORING_INACTIVE`, and `DEBUG_MOTOR_SPINUP` may apply
+`motorDuty`; `DISABLED`, `DEBUG_SCORING_TEST`, unknown states, stale commands,
+and negative duty all command motor stop. This Hub's existing motor path has
+only one direction: duty `0` maps to `1500 us` (stop) and duty `1` maps to
+`1350 us` (full forward) on Uno `D9`.
 
-Install PlatformIO, connect one ESP32 over USB, and run:
+`matchState` remains parsed for protocol compatibility and logging, but neither
+the 4201 reference Hub nor this ESP32-to-Uno output link needs it to decide LED
+or motor behavior. `hubState`, `motorDuty`, and `ledPattern` are sufficient.
+
+The Uno disables D2's internal pull-up so it cannot feed 5 V into ESP32 GPIO
+15. A shared ground is mandatory. For a long or electrically noisy GPIO15/D2
+cable, add a 3.3 V-to-5 V HCT-level buffer; no additional signal wire is
+required. GPIO15 is no longer compatible with the earlier one-bit Uno sketch,
+so upload the ESP32 and Uno firmware in this repository together.
+
+## Deployment
+
+### 1. Install the host tools
+
+Install Python 3 with `pip`, then install the only required Python package:
 
 ```powershell
-py -m platformio run -e blue-hub -t upload
-py -m platformio run -e red-hub -t upload
-py -m platformio device monitor
+py -m pip install --upgrade pip
+py -m pip install --upgrade platformio
 ```
 
-The project uses the ESP32 Arduino framework with `Ethernet` and `ArduinoJson`.
+PlatformIO automatically downloads the ESP32 and Uno toolchains plus the
+firmware libraries (`Ethernet`, `ArduinoJson`, and `FastLED`) on the first
+build. Do not install those Arduino libraries with `pip`.
+
+### 2. Build before connecting hardware
+
+From the repository root, build all three firmware targets:
+
+```powershell
+py -m platformio run -e blue-hub -e red-hub
+py -m platformio run -d uno
+```
+
+### 3. Upload each physical Hub
+
+Every physical Hub contains one ESP32 and one Uno. The Uno firmware is shared;
+the ESP32 must use the target that matches its alliance. Stop the motor path
+before flashing. Use the actual USB serial port in place of `COMx`, or omit
+`--upload-port COMx` only when one compatible board is connected.
+
+For the blue Hub:
+
+```powershell
+py -m platformio run -d uno -t upload --upload-port COMx
+py -m platformio run -e blue-hub -t upload --upload-port COMy
+```
+
+For the red Hub:
+
+```powershell
+py -m platformio run -d uno -t upload --upload-port COMx
+py -m platformio run -e red-hub -t upload --upload-port COMy
+```
+
+The Uno and ESP32 firmwares must be updated as a pair: the current GPIO15/D2
+UART protocol is not compatible with the earlier one-bit Uno sketch. Do not
+flash `blue-hub` onto the red ESP32 or `red-hub` onto the blue ESP32; the build
+selects the node role and static IP address.
+
+### 4. Verify on the field network
+
+Connect the W5500 to the isolated field network, enable Alternate IO in
+Showdown Arena, and configure the addresses listed in the Network section.
+The ESP32 serial log is available at 115200 baud:
+
+```powershell
+py -m platformio device monitor --port COMy --baud 115200
+```
+
+With no valid `node_command`, the deployed outputs remain safe: the Uno turns
+the LED strip off and sends the D9 motor neutral pulse within 300 ms.
