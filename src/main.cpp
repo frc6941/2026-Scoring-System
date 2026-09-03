@@ -17,11 +17,11 @@
 
 constexpr const char *HUB_ROLE = HUB_IS_RED ? "RED_HUB" : "BLUE_HUB";
 
-// Preserve the existing field network assignment. Configure these same node
-// addresses in Showdown Arena's Red Hub Address and Blue Hub Address settings.
+// Configure these node addresses in Showdown Arena's Red Hub Address and Blue
+// Hub Address settings. The upper computer listens at 172.30.10.201.
 byte MAC_ADDRESS[] = {0xCC, 0xCC, 0xCC, 0xCC, 0xCC, HUB_IS_RED ? 0xED : 0xBE};
-IPAddress DEVICE_IP(67, 67, 67, HUB_IS_RED ? 3 : 2);
-IPAddress DEFAULT_ARENA_IP(67, 67, 67, 1);
+IPAddress DEVICE_IP(172, 30, 10, HUB_IS_RED ? 203 : 202);
+IPAddress DEFAULT_ARENA_IP(172, 30, 10, 201);
 IPAddress SUBNET_MASK(255, 255, 255, 0);
 
 constexpr int W5500_CS = 14;
@@ -38,7 +38,7 @@ constexpr uint8_t UNO_FRAME_SYNC_0 = 0xA5;
 constexpr uint8_t UNO_FRAME_SYNC_1 = 0x5A;
 constexpr uint8_t UNO_FRAME_CONTROL_VERSION = 0xA0;
 
-constexpr int IR_SENSOR_PINS[] = {33, 34, 35, 36};
+constexpr int IR_SENSOR_PINS[] = {40, 41, 42, 47};
 constexpr size_t SENSOR_COUNT = sizeof(IR_SENSOR_PINS) / sizeof(IR_SENSOR_PINS[0]);
 constexpr unsigned long DEBOUNCE_MS = 50;
 
@@ -97,6 +97,8 @@ UnoLedPattern toUnoLedPattern(const String &pattern) {
   if (pattern == "off") return UnoLedPattern::Off;
   if (pattern == "red_alliance") return UnoLedPattern::Red;
   if (pattern == "blue_alliance") return UnoLedPattern::Blue;
+  if (pattern == "red_alliance_blink") return UnoLedPattern::RedFlash;
+  if (pattern == "blue_alliance_blink") return UnoLedPattern::BlueFlash;
   return UnoLedPattern::Off;
 }
 

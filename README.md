@@ -42,17 +42,17 @@ must use the corresponding exact role and configure each Hub's IP address.
 
 ## Network
 
-The existing static network assignment is retained:
+The static network assignment is:
 
 | Device | Address |
 | --- | --- |
-| Arena / upper computer | `67.67.67.1` |
-| Blue Hub | `67.67.67.2` |
-| Red Hub | `67.67.67.3` |
+| Arena / upper computer | `172.30.10.201` |
+| Blue Hub | `172.30.10.202` |
+| Red Hub | `172.30.10.203` |
 
 In Showdown Arena, enable Alternate IO and set `Blue Hub Address` to
-`67.67.67.2` and `Red Hub Address` to `67.67.67.3`. Before the first valid
-command, status packets target `67.67.67.1`; afterward the Hub replies to the
+`172.30.10.202` and `Red Hub Address` to `172.30.10.203`. Before the first valid
+command, status packets target `172.30.10.201`; afterward the Hub replies to the
 source IP of the most recent valid `node_command`. This permits a 4201-format
 upper computer at another address on the same field subnet. Commands are not
 authenticated, so operate the system on an isolated field network: any host
@@ -61,7 +61,7 @@ that can send a valid command can update the Hub state and status target.
 ## Hardware
 
 The W5500 uses CS `14`, MISO `12`, MOSI `11`, and SCK `13`. The four
-photoelectric inputs are GPIO `33`, `34`, `35`, and `36`; they are low-active
+photoelectric inputs are GPIO `40`, `41`, `42`, and `47`; they are low-active
 and configured with internal pull-ups. Every debounced low transition adds one
 to the cumulative score. As in the 4201 reference Hub, a fresh
 `DEBUG_MOTOR_SPINUP` command clears that raw counter for manual testing.
@@ -75,15 +75,20 @@ active/inactive signal. The ESP32 sends one command every 40 ms:
 | 0 | `0xA5` |
 | 1 | `0x5A` |
 | 2 | `0xA0` protocol version, plus bit 0 for motor enabled |
-| 3 | LED pattern enum emitted by the ESP32: `0` off, `1` red, `2` blue |
+| 3 | LED pattern enum emitted by the ESP32: `0` off, `1` red, `2` blue, `3` red flash, `4` blue flash |
 | 4 | Motor duty from `0` to `255` |
 | 5 | CRC-8/ATM of bytes 0 through 4 |
 
-The upstream `ledPattern` field accepts `off`, `red_alliance`, and
-`blue_alliance`; any other value is treated as `off` by the ESP32. The Uno
-ignores incomplete, malformed, or CRC-invalid frames. Its `D6` drives
-the WS2812B LED data signal and its `D9` provides the motor PWM signal. The
-Uno controls all 4201 LED patterns, including the flash and chase animations.
+The upstream `ledPattern` field accepts `off`, `red_alliance`,
+`blue_alliance`, `red_alliance_blink`, and `blue_alliance_blink`; any other
+value is treated as `off` by the ESP32. The Uno ignores incomplete, malformed,
+or CRC-invalid frames. Its `D6` drives the WS2812B LED data signal and its `D9`
+provides the motor PWM signal. The five protocol patterns above are rendered by
+the Uno, including the two alliance warning flashes. The Uno also retains
+internal chase, green, purple, and white pattern enums for future extensions,
+but the current ESP32 mapping
+does not emit them. In particular, this protocol does not yet implement the
+Game Manual's in-match `ALLIANCE color with white chase` state.
 It sends a neutral `1500 us` motor pulse and turns the strip off if no valid
 frame arrives for 300 ms. The ESP32 independently sends an explicit safe frame
 after 300 ms without a valid 4201 command. A Hub command must include valid

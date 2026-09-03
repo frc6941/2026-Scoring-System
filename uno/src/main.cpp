@@ -30,6 +30,8 @@ constexpr size_t FRAME_SIZE = 6;
 
 constexpr uint16_t MOTOR_NEUTRAL_US = 1500;
 constexpr uint16_t MOTOR_FULL_FORWARD_US = 1350;
+constexpr unsigned long ALLIANCE_FLASH_PERIOD_MS = 1000;
+constexpr unsigned long ALLIANCE_FLASH_OFF_MS = 500;
 
 enum class LedPattern : uint8_t {
   Off = 0,
@@ -94,6 +96,11 @@ void setAll(const CRGB &color) {
   fill_solid(leds, LED_COUNT, color);
 }
 
+void renderAllianceFlash(const CRGB &color, unsigned long now) {
+  const bool off = (now % ALLIANCE_FLASH_PERIOD_MS) < ALLIANCE_FLASH_OFF_MS;
+  setAll(off ? CRGB::Black : color);
+}
+
 void renderChase(const CRGB &baseColor, unsigned long now) {
   setAll(baseColor);
 
@@ -133,10 +140,10 @@ void renderLeds(LedPattern pattern) {
       setAll(CRGB::White);
       break;
     case LedPattern::RedFlash:
-      setAll((now % 1000) < 500 ? CRGB::Black : CRGB::Red);
+      renderAllianceFlash(CRGB::Red, now);
       break;
     case LedPattern::BlueFlash:
-      setAll((now % 1000) < 500 ? CRGB::Black : CRGB::Blue);
+      renderAllianceFlash(CRGB::Blue, now);
       break;
     case LedPattern::RedChase:
       renderChase(CRGB::Red, now);
