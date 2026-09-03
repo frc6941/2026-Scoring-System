@@ -94,15 +94,9 @@ bool hubStateAllowsMotor(const String &hubState) {
 }
 
 UnoLedPattern toUnoLedPattern(const String &pattern) {
-  if (pattern == "red") return UnoLedPattern::Red;
-  if (pattern == "blue") return UnoLedPattern::Blue;
-  if (pattern == "red_flash") return UnoLedPattern::RedFlash;
-  if (pattern == "blue_flash") return UnoLedPattern::BlueFlash;
-  if (pattern == "red_chase") return UnoLedPattern::RedChase;
-  if (pattern == "blue_chase") return UnoLedPattern::BlueChase;
-  if (pattern == "green") return UnoLedPattern::Green;
-  if (pattern == "purple") return UnoLedPattern::Purple;
-  if (pattern == "white") return UnoLedPattern::White;
+  if (pattern == "off") return UnoLedPattern::Off;
+  if (pattern == "red_alliance") return UnoLedPattern::Red;
+  if (pattern == "blue_alliance") return UnoLedPattern::Blue;
   return UnoLedPattern::Off;
 }
 

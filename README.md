@@ -14,7 +14,7 @@ The Hub listens for `node_command` JSON on UDP port `5300` and sends a
   "type": "node_command",
   "hubState": "SCORING_ACTIVE",
   "motorDuty": 1.0,
-  "ledPattern": "red",
+  "ledPattern": "red_alliance",
   "matchState": 3
 }
 ```
@@ -75,11 +75,13 @@ active/inactive signal. The ESP32 sends one command every 40 ms:
 | 0 | `0xA5` |
 | 1 | `0x5A` |
 | 2 | `0xA0` protocol version, plus bit 0 for motor enabled |
-| 3 | LED pattern enum: `0` off, `1` red, `2` blue, `3` red flash, `4` blue flash, `5` red chase, `6` blue chase, `7` green, `8` purple, `9` white |
+| 3 | LED pattern enum emitted by the ESP32: `0` off, `1` red, `2` blue |
 | 4 | Motor duty from `0` to `255` |
 | 5 | CRC-8/ATM of bytes 0 through 4 |
 
-The Uno ignores incomplete, malformed, or CRC-invalid frames. Its `D6` drives
+The upstream `ledPattern` field accepts `off`, `red_alliance`, and
+`blue_alliance`; any other value is treated as `off` by the ESP32. The Uno
+ignores incomplete, malformed, or CRC-invalid frames. Its `D6` drives
 the WS2812B LED data signal and its `D9` provides the motor PWM signal. The
 Uno controls all 4201 LED patterns, including the flash and chase animations.
 It sends a neutral `1500 us` motor pulse and turns the strip off if no valid
