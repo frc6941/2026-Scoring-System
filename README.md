@@ -98,8 +98,9 @@ For motor state gating, the ESP32 follows the 4201 reference Hub:
 `SCORING_ACTIVE`, `SCORING_INACTIVE`, and `DEBUG_MOTOR_SPINUP` may apply
 `motorDuty`; `DISABLED`, `DEBUG_SCORING_TEST`, unknown states, stale commands,
 and negative duty all command motor stop. This Hub's existing motor path has
-only one direction: duty `0` maps to `1500 us` (stop) and duty `1` maps to
-`1350 us` (full forward) on Uno `D9`.
+only one direction: duty `0` maps to the standard Talon RC-PWM neutral pulse
+of `1500 us` (stop) and duty `1` maps to the full-output `1000 us` pulse on
+Uno `D9`. D9 runs a standard `50 Hz` (`20 ms` period) RC-PWM signal.
 
 `matchState` remains parsed for protocol compatibility and logging, but neither
 the 4201 reference Hub nor this ESP32-to-Uno output link needs it to decide LED

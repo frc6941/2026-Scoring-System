@@ -29,7 +29,9 @@ constexpr uint8_t FRAME_MOTOR_ENABLE = 0x01;
 constexpr size_t FRAME_SIZE = 6;
 
 constexpr uint16_t MOTOR_NEUTRAL_US = 1500;
-constexpr uint16_t MOTOR_FULL_FORWARD_US = 1350;
+// Talon RC-PWM input: 1500 us is neutral and 1000 us is full output in the
+// direction already established by the previous 1350 us command.
+constexpr uint16_t MOTOR_FULL_FORWARD_US = 1000;
 constexpr unsigned long ALLIANCE_FLASH_PERIOD_MS = 1000;
 constexpr unsigned long ALLIANCE_FLASH_OFF_MS = 500;
 
@@ -68,10 +70,11 @@ uint8_t crc8Atm(const uint8_t *data, size_t length) {
 }
 
 void setupTimer1Pwm() {
-  // Fast PWM mode 14, 200 Hz. OC1A is Uno D9.
+  // Fast PWM mode 14, 50 Hz RC PWM. OC1A is Uno D9.
   TCCR1A = _BV(COM1A1) | _BV(WGM11);
   TCCR1B = _BV(WGM13) | _BV(WGM12) | _BV(CS11);
-  ICR1 = 9999;
+  // At 16 MHz with /8 prescaling, each timer count is 0.5 us.
+  ICR1 = 39999;
   pinMode(MOTOR_PIN, OUTPUT);
 }
 
